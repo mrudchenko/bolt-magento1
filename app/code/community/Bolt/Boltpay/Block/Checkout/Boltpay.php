@@ -169,6 +169,10 @@ PROMISE;
                 ////////////////////////////////////////////////////////////////////////////////
                 /** @var Mage_Sales_Model_Quote $immutableQuote */
                 $immutableQuote = $boltHelper->cloneQuote($sessionQuote, $isMultiPage);
+
+                $immutableQuote->getShippingAddress()->unsetData('address_id');
+                $immutableQuote->getBillingAddress()->unsetData('address_id');
+
                 ////////////////////////////////////////////////////////////////////////////////
 
                 $orderCreationResponse = $this->getBoltOrderToken($immutableQuote, $checkoutType);
@@ -837,7 +841,7 @@ PROMISE;
 
         $isAllowed = ($routeName === 'checkout' && $controllerName === 'cart')
                         || ($routeName == 'firecheckout')
-                        || ($routeName === 'adminhtml' && $controllerName === 'sales_order_create');
+                        || ($routeName === 'adminhtml' && strpos($controllerName, 'sales_order_') !== false);
 
         return $isAllowed;
     }
