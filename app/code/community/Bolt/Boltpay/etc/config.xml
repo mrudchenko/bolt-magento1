@@ -186,7 +186,7 @@
       <adminhtml>
         <args>
           <modules>
-            <Bolt_Boltpay before="Mage_Adminhtml">Bolt_Boltpay_Adminhtml</Bolt_Boltpay>
+            <Bolt_Boltpay before="TBT_Rewards_Adminhtml">Bolt_Boltpay_Adminhtml</Bolt_Boltpay>
           </modules>
         </args>
       </adminhtml>

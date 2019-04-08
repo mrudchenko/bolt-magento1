@@ -15,7 +15,7 @@
  * @license    http://opensource.org/licenses/osl-3.0.php  Open Software License (OSL 3.0)
  */
 
-require_once(Mage::getModuleDir('controllers','Mage_Adminhtml').DS.'Sales'.DS.'Order'.DS.'CreateController.php');
+require_once(Mage::getModuleDir('controllers','TBT_Rewards').DS.'Adminhtml'.DS.'Sales'.DS.'Order'.DS.'CreateController.php');
 require_once(Mage::getModuleDir('controllers','Bolt_Boltpay').DS.'OrderControllerTrait.php');
 
 /**
@@ -25,7 +25,7 @@ require_once(Mage::getModuleDir('controllers','Bolt_Boltpay').DS.'OrderControlle
  * @package    Mage_Adminhtml
  * @author      Magento Core Team <core@magentocommerce.com>
  */
-class Bolt_Boltpay_Adminhtml_Sales_Order_CreateController extends Mage_Adminhtml_Sales_Order_CreateController
+class Bolt_Boltpay_Adminhtml_Sales_Order_CreateController extends TBT_Rewards_Adminhtml_Sales_Order_CreateController
 {
     use Bolt_Boltpay_OrderControllerTrait;
 
