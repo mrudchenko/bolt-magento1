@@ -34,6 +34,11 @@
           <validator>Bolt_Boltpay_Model_Validator</validator>
         </rewrite>
       </salesrule>
+      <TBT_Rewards>
+        <rewrite>
+          <salesrule_discount_validator>Bolt_Boltpay_Model_Validator</salesrule_discount_validator>
+        </rewrite>
+      </TBT_Rewards>
     </models>
 
     <blocks>

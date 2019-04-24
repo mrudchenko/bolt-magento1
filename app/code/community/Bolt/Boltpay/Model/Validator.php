@@ -15,7 +15,8 @@
  * @license    http://opensource.org/licenses/osl-3.0.php  Open Software License (OSL 3.0)
  */
 
-class Bolt_Boltpay_Model_Validator extends Mage_SalesRule_Model_Validator
+//class Bolt_Boltpay_Model_Validator extends Mage_SalesRule_Model_Validator
+class Bolt_Boltpay_Model_Validator extends TBT_Rewards_Model_Salesrule_Discount_Validator
 {
     use Bolt_Boltpay_BoltGlobalTrait;
     
