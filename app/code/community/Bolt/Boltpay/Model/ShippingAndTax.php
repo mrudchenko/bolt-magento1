@@ -157,12 +157,11 @@ class Bolt_Boltpay_Model_ShippingAndTax extends Bolt_Boltpay_Model_Abstract
                 return $response;
             }
 
-            Mage::register('bolt_quote', $parentQuote);
-            Mage::register('bolt_hook', true);
+            if ($parentQuote) {
+                Mage::register('bolt_quote', $parentQuote);
+                Mage::register('bolt_hook', true);
+            }
             $this->applyShippingRate($quote, null);
-
-            Mage::unregister('bolt_quote');
-            Mage::unregister('bolt_hook');
 
             $shippingAddress = $quote->getShippingAddress();
             $shippingAddress->setCollectShippingRates(true)->collectShippingRates()->save();
@@ -208,6 +207,8 @@ class Bolt_Boltpay_Model_ShippingAndTax extends Bolt_Boltpay_Model_Abstract
 
                 $response['shipping_options'][] = $option;
             }
+            Mage::unregister('bolt_quote');
+            Mage::unregister('bolt_hook');
         } finally {
             $quote->setCouponCode($originalCouponCode);
         }

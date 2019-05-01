@@ -159,6 +159,10 @@ class Bolt_Boltpay_Model_Order extends Bolt_Boltpay_Model_Abstract
                 }
 
                 if ($shippingMethodCode) {
+                    if ($parentQuote) {
+                        Mage::register('bolt_quote', $parentQuote);
+                        Mage::register('bolt_hook', true);
+                    }
                     $shippingAndTaxModel->applyShippingRate($immutableQuote, $shippingMethodCode);
                     $shippingAddress->save();
                     Mage::dispatchEvent(
@@ -168,6 +172,8 @@ class Bolt_Boltpay_Model_Order extends Bolt_Boltpay_Model_Abstract
                             'shippingMethodCode' => $shippingMethodCode
                         )
                     );
+                    Mage::unregister('bolt_quote');
+                    Mage::unregister('bolt_hook');
                 } else {
                     $errorMessage = $this->boltHelper()->__('Shipping method not found');
                     $metaData = array(
