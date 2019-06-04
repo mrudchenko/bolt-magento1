@@ -13,6 +13,7 @@ apt-get -o Acquire::Check-Valid-Until=false update
 apt-get -y install curl php5-curl mysql-client php5-mcrypt php5-xdebug
 php5enmod mcrypt
 
+pwd
 curl -O https://files.magerun.net/n98-magerun.phar
 chmod +x n98-magerun.phar
 
