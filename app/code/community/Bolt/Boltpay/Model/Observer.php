@@ -25,142 +25,191 @@ class Bolt_Boltpay_Model_Observer
     use Bolt_Boltpay_BoltGlobalTrait;
 
     /**
-     * Event handler called after a save event.
-     * Adds the Bolt User Id to the newly registered customer.
+     * Initializes the benchmark profiler
      *
-     * @param $observer
-     * @throws Exception
+     * event: controller_front_init_before
      */
-    public function setBoltUserId($observer) 
+    public function initializeBenchmarkProfiler()
     {
+        $hasInitializedProfiler = Mage::registry('initializedBenchmark' );
 
-        $quote = $observer->getEvent()->getQuote();
-        $session = Mage::getSingleton('customer/session');
+        if (!$hasInitializedProfiler) {
 
-        try {
-            $customer = $quote->getCustomer();
-            $boltUserId = $session->getBoltUserId();
+            Mage::register('bolt/request_start_time', microtime(true), true);
 
-            if ($customer != null && $boltUserId != null) {
-                if ($customer->getBoltUserId() == null || $customer->getBoltUserId() == 0) {
-                    //Mage::log("Bolt_Boltpay_Model_Observer.saveOrderAfter: Adding bolt_user_id to the customer from the quote", null, 'bolt.log');
-                    $customer->setBoltUserId($boltUserId);
-                    $customer->save();
-                }
+            /**
+             * Logs the time taken to reach the point in the codebase
+             *
+             * @param string $label                  Label to add to the benchmark
+             * @param bool   $shouldLogIndividually  If true, the benchmark will be logged separately in addition to with the full log
+             * @param bool   $shouldIncludeInFullLog If false, this benchmark will not be included in the full log
+             * @param bool   $shouldFlushFullLog     If true, will log the full log up to this benchmark call.
+             */
+            function benchmark( $label, $shouldLogIndividually = false, $shouldIncludeInFullLog = true, $shouldFlushFullLog = false )  {
+                /** @var Bolt_Boltpay_Helper_Data $boltHelper */
+                $boltHelper = Mage::helper('boltpay');
+                $boltHelper->logBenchmark($label, $shouldLogIndividually, $shouldIncludeInFullLog, $shouldFlushFullLog);
             }
-        } catch (Exception $e) {
-            $this->boltHelper()->notifyException($e);
-        }
 
-        $session->unsBoltUserId();
-    }
-
-    /**
-     * Event handler called after a save event.
-     * Calls the complete authorize Bolt end point to confirm the order is valid.
-     * If the order has been changed between the creation on Bolt end and the save in Magento
-     * an order info message is recorded to inform the merchant and a bugsnag notification sent to Bolt.
-     *
-     * @param $observer
-     * @throws Exception
-     */
-    public function verifyOrderContents($observer)
-    {
-        /* @var Mage_Sales_Model_Quote $quote */
-        $quote = $observer->getEvent()->getQuote();
-        /* @var Mage_Sales_Model_Order $order */
-        $order = $observer->getEvent()->getOrder();
-        $transaction = $observer->getEvent()->getTransaction();
-        $payment = $quote->getPayment();
-        $method = $payment->getMethod();
-        if (strtolower($method) == Bolt_Boltpay_Model_Payment::METHOD_CODE) {
-            $reference = $payment->getAdditionalInformation('bolt_reference');
-            $magentoTotal = (int)(round($order->getGrandTotal() * 100));
-            if ($magentoTotal !== $transaction->amount->amount)  {
-                $message = $this->boltHelper()->__("THERE IS A MISMATCH IN THE ORDER PAID AND ORDER RECORDED.<br>
-                           PLEASE COMPARE THE ORDER DETAILS WITH THAT RECORD IN YOUR BOLT MERCHANT ACCOUNT AT: %s/transaction/%s<br/>
-                           Bolt reports %s. Magento expects %s", $this->boltHelper()->getBoltMerchantUrl(),
-                    $reference, ($transaction->amount->amount/100), ($magentoTotal/100) );
-
-                # Adjust amount if it is off by only one cent, likely due to rounding
-                $difference = $transaction->amount->amount - $magentoTotal;
-                if ( abs($difference) == 1) {
-                    $order->setTaxAmount($order->getTaxAmount() + ($difference/100))
-                        ->setBaseTaxAmount($order->getBaseTaxAmount() + ($difference/100))
-                        ->setGrandTotal($order->getGrandTotal() + ($difference/100))
-                        ->setBaseGrandTotal($order->getBaseGrandTotal() + ($difference/100))
-                        ->save();
-                } else {
-                    # Total differs by more than one cent, so we put the order on hold.
-                    $order->setHoldBeforeState($order->getState());
-                    $order->setHoldBeforeStatus($order->getStatus());
-                    $order->setState(Mage_Sales_Model_Order::STATE_HOLDED, true, $message)
-                        ->save();
-                }
-                $metaData = array(
-                    'process'   => "order verification",
-                    'reference'  => $reference,
-                    'quote_id'   => $quote->getId(),
-                    'display_id' => $order->getIncrementId(),
-                );
-                $this->boltHelper()->notifyException(new Exception($message), $metaData);
-            }
-            $this->sendOrderEmail($order);
-            $order->save();
+            Mage::register('initializedBenchmark', true, true);
         }
     }
 
     /**
-     * Clears the Shopping Cart after the success page
+     * Submits the final benchmark profiler log
+     *
+     * event: controller_front_send_response_after
+     */
+    public function logFullBenchmarkProfile()
+    {
+        benchmark(null, false, false, true );
+    }
+
+    /**
+     * Clears the Shopping Cart except product page checkout order after the success page
+     *
+     * @param Varien_Event_Observer $observer   An Observer object with an empty event object
      *
      * Event: checkout_onepage_controller_success_action
+     * @param $observer
      */
-    public function clearShoppingCart() {
-        $cartHelper = Mage::helper('checkout/cart');
-        $cartHelper->getCart()->truncate()->save();
-    }
-
-    public function sendCompleteAuthorizeRequest($request)
+    public function clearShoppingCartExceptPPCOrder()
     {
-        return $this->boltHelper()->transmit('complete_authorize', $request);
+        $cartHelper = Mage::helper('checkout/cart');
+        if (Mage::app()->getRequest()->getParam('checkoutType') == Bolt_Boltpay_Block_Checkout_Boltpay::CHECKOUT_TYPE_PRODUCT_PAGE) {
+            $quoteId = Mage::app()->getRequest()->getParam('session_quote_id');
+            Mage::getSingleton('checkout/session')->setQuoteId($quoteId);
+        } else {
+            $cartHelper->getCart()->truncate()->save();
+        }
     }
 
     /**
-     * @param $order Mage_Sales_Model_Order
+     * This will clear the cart cache, forcing creation of a new immutable quote, if
+     * the parent quote has been flagged by having a parent quote Id as its own
+     * id.
+     *
+     * event: controller_action_predispatch
+     *
+     * @param Varien_Event_Observer $observer event contains front (Mage_Core_Controller_Varien_Front)
      */
-    public function sendOrderEmail($order)
-    {
-        try {
-            $order->sendNewOrderEmail();
-        } catch (Exception $e) {
-            // Catches errors that occur when sending order email confirmation (e.g. external API is down)
-            // and allows order creation to complete.
+    public function clearCartCacheOnOrderCanceled($observer) {
 
-            $error = new Exception('Failed to send order email', 0, $e);
-            $this->boltHelper()->notifyException($error);
+        /** @var Mage_Sales_Model_Quote $quote */
+        $quote = Mage::getSingleton('checkout/session')->getQuote();
+
+        if ($quote && is_int($quote->getId()) && $quote->getId() === $quote->getParentQuoteId()) {
+            Mage::getSingleton('core/session')->unsCachedCartData();
+            // clear the parent quote ID to re-enable cart cache
+            $quote->setParentQuoteId(null);
+        }
+    }
+
+    /**
+     * Sets native session variables for the order success method that were made available via params sent by
+     * Bolt.  If this is not an order success call invoked by Bolt, then the function is exited.
+     *
+     * event: controller_action_predispatch
+     *
+     * @param Varien_Event_Observer $observer unused
+     *
+     * @throws Exception when quote totals have not been properly collected
+     */
+    public function setSuccessSessionData($observer) {
+
+        /** @var Mage_Checkout_Model_Session $checkoutSession */
+        $checkoutSession = Mage::getSingleton('checkout/session');
+        $requestParams = Mage::app()->getRequest()->getParams();
+
+        // Handle only Bolt orders
+        if (!isset($requestParams['bolt_payload'])  && !isset($requestParams['bolt_transaction_reference'])) {
             return;
         }
 
-        $history = $order->addStatusHistoryComment( $this->boltHelper()->__('Email sent for order %s', $order->getIncrementId()) );
-        $history->setIsCustomerNotified(true);
+        if (isset($requestParams['bolt_payload'])) {
+            $payload = @$requestParams['bolt_payload'];
+            $signature = base64_decode(@$requestParams['bolt_signature']);
+
+            if (!$this->boltHelper()->verify_hook($payload, $signature)) {
+                // If signature verification fails, we log the error and immediately return control to Magento
+                $exception = new Bolt_Boltpay_OrderCreationException(
+                    Bolt_Boltpay_OrderCreationException::E_BOLT_GENERAL_ERROR,
+                    Bolt_Boltpay_OrderCreationException::E_BOLT_GENERAL_ERROR_TMPL_HMAC
+                );
+                $this->boltHelper()->notifyException($exception, array(), 'warning');
+                $this->boltHelper()->logWarning($exception->getMessage());
+
+                return;
+            }
+
+            $quote = $checkoutSession->getQuote();
+
+            /* @var Mage_Sales_Model_Quote $immutableQuote */
+            $immutableQuote = Mage::getModel('sales/quote')->loadByIdWithoutStore($quote->getParentQuoteId());
+
+        } else if (isset($requestParams['bolt_transaction_reference'])) {
+            ////////////////////////////////////////////////////////////////////
+            // Orphaned transaction and v 1.x (legacy) Success page handling
+            // Note: order may not have been created at this point so in those
+            // cases, we use a psuedo order id to meet success page rendering
+            // requirements
+            ////////////////////////////////////////////////////////////////////
+
+            /** @var Bolt_Boltpay_Model_Order $orderModel */
+            $orderModel = Mage::getModel('boltpay/order');
+            $transaction = $this->boltHelper()->fetchTransaction($requestParams['bolt_transaction_reference']);
+
+            $immutableQuoteId = $this->boltHelper()->getImmutableQuoteIdFromTransaction($transaction);
+            $immutableQuote = $orderModel->getQuoteById($immutableQuoteId);
+            $incrementId = $this->boltHelper()->getIncrementIdFromTransaction($transaction);
+
+            /** @var Mage_Sales_Model_Order $order */
+            $order = Mage::getModel('sales/order')->loadByIncrementId($incrementId);
+            $orderEntityId = (!$order->isObjectNew()) ? $order->getId() : Bolt_Boltpay_Model_Order::MAX_ORDER_ID;  # use required max sentinel id if order not yet created
+
+            $requestParams['lastQuoteId'] = $requestParams['lastSuccessQuoteId'] = $immutableQuoteId;
+            $requestParams['lastOrderId'] = $orderEntityId;
+            $requestParams['lastRealOrderId'] = $incrementId;
+        }
+
+        $checkoutSession
+            ->clearHelperData();
+
+        $recurringPaymentProfilesIds = array();
+        $recurringPaymentProfiles = $immutableQuote->collectTotals()->prepareRecurringPaymentProfiles();
+
+        /** @var Mage_Payment_Model_Recurring_Profile $profile */
+        foreach((array)$recurringPaymentProfiles as $profile) {
+            $recurringPaymentProfilesIds[] = $profile->getId();
+        }
+
+        $checkoutSession
+            ->setLastQuoteId($requestParams['lastQuoteId'])
+            ->setLastSuccessQuoteId($requestParams['lastSuccessQuoteId'])
+            ->setLastOrderId($requestParams['lastOrderId'])
+            ->setLastRealOrderId($requestParams['lastRealOrderId'])
+            ->setLastRecurringProfileIds($recurringPaymentProfilesIds);
+
     }
 
     /**
      * Event handler called when bolt payment capture.
      * Add the message Magento Order Id: "xxxxxxxxx" to the standard payment capture message.
      *
-     * @param $observer
+     * event: sales_order_payment_capture
+     *
+     * @param Varien_Event_Observer $observer Observer event contains payment object
      */
     public function addMessageWhenCapture($observer)
     {
         /** @var Mage_Sales_Model_Order_Payment $payment */
         $payment = $observer->getEvent()->getPayment();
-        /** @var Mage_Sales_Model_Order $order */
         $order = $payment->getOrder();
-
         $method = $payment->getMethod();
+        $message = '';
+
         if (strtolower($method) == Bolt_Boltpay_Model_Payment::METHOD_CODE) {
-            $message = $this->_addMagentoOrderIdToMessage($order->getIncrementId());
+            $message .= ($incrementId = $order->getIncrementId()) ? $this->boltHelper()->__('Magento Order ID: "%s".', $incrementId) : "";
             if (!empty($message)) {
                 $observer->getEvent()->getPayment()->setPreparedMessage($message);
             }
@@ -168,110 +217,78 @@ class Bolt_Boltpay_Model_Observer
     }
 
     /**
-     * Updates the Magento's interpretation of the Bolt transaction status on order status change.
-     * Note: this transaction status is not necessarily same as order status on the Bolt server.
-     * bolt_transaction_status field keeps track of payment status only from the magento plugin's perspective.
+     * Hides the Bolt Pre-auth order states from the admin->Sales->Order list
      *
-     * @param $observer
-     */
-    public function updateBoltTransactionStatus($observer)
-    {
-        /* @var Mage_Sales_Model_Order $order */
-        $order = $observer->getOrder();
-
-        /** @var Mage_Sales_Model_Order_Payment $payment */
-        $payment = $order->getPayment();
-
-        $method = $payment->getMethod();
-        if (strtolower($method) == Bolt_Boltpay_Model_Payment::METHOD_CODE) {
-
-            switch ($order->getState()) {
-                case Mage_Sales_Model_Order::STATE_COMPLETE:
-                case Mage_Sales_Model_Order::STATE_CLOSED:
-                    $payment->setAdditionalInformation('bolt_transaction_status', Bolt_Boltpay_Model_Payment::TRANSACTION_COMPLETED);
-                    break;
-                case Mage_Sales_Model_Order::STATE_PROCESSING:
-                    if (!$order->getTotalDue()) {
-                        $payment->setAdditionalInformation('bolt_transaction_status', Bolt_Boltpay_Model_Payment::TRANSACTION_COMPLETED);
-                    } else {
-                        $payment->setAdditionalInformation('bolt_transaction_status', Bolt_Boltpay_Model_Payment::TRANSACTION_AUTHORIZED);
-                    }
-                    break;
-                case Mage_Sales_Model_Order::STATE_PAYMENT_REVIEW:
-                    $payment->setAdditionalInformation('bolt_transaction_status', Bolt_Boltpay_Model_Payment::TRANSACTION_PENDING);
-                    break;
-                case Mage_Sales_Model_Order::STATE_HOLDED:
-                    $payment->setAdditionalInformation('bolt_transaction_status', Bolt_Boltpay_Model_Payment::TRANSACTION_ON_HOLD);
-                    break;
-                case Mage_Sales_Model_Order::STATE_CANCELED:
-                    $payment->setAdditionalInformation('bolt_transaction_status', Bolt_Boltpay_Model_Payment::TRANSACTION_CANCELLED);
-                    break;
-                case Mage_Sales_Model_Order::STATE_PENDING_PAYMENT:
-                case Mage_Sales_Model_Order::STATE_NEW:
-                    $payment->setAdditionalInformation('bolt_transaction_status', Bolt_Boltpay_Model_Payment::TRANSACTION_PENDING);
-                    break;
-                case Bolt_Boltpay_Model_Payment::ORDER_DEFERRED:
-                    $payment->setAdditionalInformation('bolt_transaction_status', Bolt_Boltpay_Model_Payment::TRANSACTION_REJECTED_REVERSIBLE);
-                    break;
-            }
-            $payment->save();
-        }
-    }
-
-    /**
-     * Add Magento Order ID to the prepared message.
+     * event: sales_order_grid_collection_load_before
      *
-     * @param number|string $incrementId
-     * @return string
+     * @param Varien_Event_Observer $observer Observer event contains an orderGridCollection object
      */
-    protected function _addMagentoOrderIdToMessage($incrementId)
-    {
-        if ($incrementId) {
-            return $this->boltHelper()->__('Magento Order ID: "%s".', $incrementId);
-        }
+    public function hidePreAuthOrders($observer) {
+        if ($this->boltHelper()->getExtraConfig('displayPreAuthOrders')) { return; }
 
-        return '';
-    }
-
-    /**
-     * Sets the order's initial status according to Bolt and annotates it with creation and payment meta data
-     *
-     * @param Varien_Event_Observer $observer   the observer object which contains the order
-     */
-    public function setInitialOrderStatusAndDetails(Varien_Event_Observer $observer) {
-
-        /** @var Mage_Sales_Model_Order $order */
-        $order = $observer->getEvent()->getOrder();
-        $payment = $order->getPayment();
-
-        $paymentMethod = $payment->getMethod();
-        if (strtolower($paymentMethod) !== Bolt_Boltpay_Model_Payment::METHOD_CODE) {
-            return;
-        }
-
-        $reference = Mage::getSingleton('core/session')->getBoltReference();
-        $transaction = Mage::getSingleton('core/session')->getBoltTransaction() ?: $this->boltHelper()->fetchTransaction($reference);
-
-        $boltCartTotal = $transaction->amount->currency_symbol. ($transaction->amount->amount/100);
-        $orderTotal = $order->getGrandTotal();
-
-        $msg = $this->boltHelper()->__(
-            "BOLT notification: Authorization requested for %s.  Order total is %s. Bolt transaction: %s/transaction/%s.", 
-            $boltCartTotal, $transaction->amount->currency_symbol.$orderTotal, $this->boltHelper()->getBoltMerchantUrl(), $transaction->reference
+        /** @var Mage_Sales_Model_Resource_Order_Grid_Collection $orderGridCollection */
+        $orderGridCollection = $observer->getEvent()->getOrderGridCollection();
+        $orderGridCollection->addFieldToFilter('main_table.status',
+            array(
+                'nin'=>array(
+                    Bolt_Boltpay_Model_Payment::TRANSACTION_PRE_AUTH_PENDING,
+                    Bolt_Boltpay_Model_Payment::TRANSACTION_PRE_AUTH_CANCELED
+                )
+            )
         );
+    }
 
-        if(Mage::getSingleton('core/session')->getWasCreatedByHook()){ // order is create via AJAX call
-            $msg .= $this->boltHelper()->__("  This order was created via webhook (Bolt traceId: <%s>)", $this->boltHelper()->getBoltTraceId());
+    /**
+     * Prevents Magento from changing the Bolt preauth statuses
+     *
+     * event: sales_order_save_before
+     *
+     * @param Varien_Event_Observer $observer Observer event contains an order object
+     */
+    public function safeguardPreAuthStatus($observer) {
+        $order = $observer->getEvent()->getOrder();
+        if (
+            !Bolt_Boltpay_Helper_Data::$fromHooks
+            && in_array(
+                $order->getOrigData('status'),
+                array(
+                    Bolt_Boltpay_Model_Payment::TRANSACTION_PRE_AUTH_PENDING,
+                    Bolt_Boltpay_Model_Payment::TRANSACTION_PRE_AUTH_CANCELED
+                )
+            )
+        )
+        {
+            $order->setStatus($order->getOrigData('status'));
         }
+    }
 
-        $order->setState(Bolt_Boltpay_Model_Payment::transactionStatusToOrderStatus($transaction->status), true, $msg)
-            ->save();
-
-        $order->getPayment()
-            ->setAdditionalInformation('bolt_transaction_status', $transaction->status)
-            ->setAdditionalInformation('bolt_reference', $transaction->reference)
-            ->setAdditionalInformation('bolt_merchant_transaction_id', $transaction->id)
-            ->setTransactionId($transaction->id)
-            ->save();
+    /**
+     * This is the last chance, bottom line price check.  It is done after the submit service
+     * has created the order, but before the order is committed to the database.  This allows
+     * to get the actual totals that will be stored in the database and catch all unexpected
+     * changes.  We have the option to attempt to correct any problems here.  If there remain
+     * any unhandled problems, we can throw an exception and avoid complex order rollback.
+     *
+     * This is called from the observer context
+     *
+     * event: sales_model_service_quote_submit_before
+     *
+     * @param Varien_Event_Observer $observer Observer event contains an order and (immutable) quote
+     *                                        -  Mage_Sales_Model_Order order
+     *                                        -  Mage_Sales_Model_Quote quote
+     *
+     *                                        The $quote, in turn holds
+     *                                        -  Mage_Sales_Model_Quote parent (ONLY pre-auth; will be empty for admin)
+     *                                        -  object (bolt) transaction (ONLY pre-auth; will be empty for admin)
+     *
+     *
+     * @throws Exception    if an unknown error occurs
+     * @throws Bolt_Boltpay_OrderCreationException if the bottom line price total differs by allowed tolerance
+     *
+     */
+    public function validateBeforeOrderCommit($observer) {
+        /** @var  Bolt_Boltpay_Model_Order $orderModel */
+        $orderModel = Mage::getModel('boltpay/order');
+        $orderModel->validateBeforeOrderCommit($observer);
     }
 }

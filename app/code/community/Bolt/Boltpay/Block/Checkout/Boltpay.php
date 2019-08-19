@@ -55,35 +55,6 @@ class Bolt_Boltpay_Block_Checkout_Boltpay extends Mage_Checkout_Block_Onepage_Re
     }
 
     /**
-     * Validate virtual quote
-     *
-     * @param Mage_Sales_Model_Quote $quote
-     *
-     * @return bool
-     */
-    protected function validateVirtualQuote($quote)
-    {
-       if (!$quote->isVirtual()){
-           return true;
-       }
-
-       $address = $quote->getBillingAddress();
-
-        if (
-            !$address->getLastname() ||
-            !$address->getStreet1() ||
-            !$address->getCity() ||
-            !$address->getPostcode() ||
-            !$address->getTelephone() ||
-            !$address->getCountryId()
-        ){
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
      * Initiates the Bolt order creation / token receiving and sets up BoltCheckout with generated data.
      * In BoltCheckout.configure success callback the order is saved in additional ajax call to
      * Bolt_Boltpay_OrderController save action.
@@ -130,6 +101,7 @@ class Bolt_Boltpay_Block_Checkout_Boltpay extends Mage_Checkout_Block_Onepage_Re
 
             } catch (Exception $e) {
                 $metaData = array('quote' => var_export($sessionQuote->debug(), true));
+                $this->boltHelper()->logException($e,$metaData);
                 $this->boltHelper()->notifyException(
                     new Exception($e),
                     $metaData
@@ -139,6 +111,7 @@ class Bolt_Boltpay_Block_Checkout_Boltpay extends Mage_Checkout_Block_Onepage_Re
             return $this->buildBoltCheckoutJavascript($checkoutType, $sessionQuote, $hintData, $cartData);
 
         } catch (Exception $e) {
+            $this->boltHelper()->logException($e);
             $this->boltHelper()->notifyException($e);
         }
     }
@@ -157,18 +130,14 @@ class Bolt_Boltpay_Block_Checkout_Boltpay extends Mage_Checkout_Block_Onepage_Re
      * Generate cart data
      *
      * @param      $orderCreationResponse
-     * @param null $checkoutType
      * @return array
      */
-    public function buildCartData($orderCreationResponse, $checkoutType = null)
+    public function buildCartData($orderCreationResponse)
     {
-        $authCapture = $checkoutType === 'admin' ? true : Mage::getStoreConfigFlag('payment/boltpay/auto_capture');
-
         //////////////////////////////////////////////////////////////////////////
         // Generate JSON cart and hints objects for the javascript returned below.
         //////////////////////////////////////////////////////////////////////////
         $cartData = array(
-            'authcapture' => $authCapture,
             'orderToken' => ($orderCreationResponse) ? $orderCreationResponse->token: '',
         );
 
@@ -345,7 +314,11 @@ class Bolt_Boltpay_Block_Checkout_Boltpay extends Mage_Checkout_Block_Onepage_Re
             $hints['virtual_terminal_mode'] = true;
         }
 
-        $hints['prefill'] = $prefill;
+        // Skip pre-fill for Apple Pay related data.
+        if (!(@$prefill['email'] == 'fake@email.com' || @$prefill['phone'] == '1111111111')) {
+            $hints['prefill'] = $prefill;
+        }
+
         return $hints;
     }
 
@@ -446,6 +419,16 @@ class Bolt_Boltpay_Block_Checkout_Boltpay extends Mage_Checkout_Block_Onepage_Re
     public function getAdditionalCSS()
     {
         return Mage::getStoreConfig('payment/boltpay/additional_css');
+    }
+
+    /**
+     * Additional JS that is to be added on any page where the Bolt Button is rendered
+     *
+     * @return string   Well formed Javascript to typically be placed within a <script> tag
+     */
+    public function getAdditionalJs()
+    {
+        return Mage::getStoreConfig('payment/boltpay/additional_js');
     }
 
     /**

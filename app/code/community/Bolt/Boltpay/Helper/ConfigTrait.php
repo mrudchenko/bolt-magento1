@@ -128,7 +128,8 @@ trait Bolt_Boltpay_Helper_ConfigTrait {
         $checkoutType = Bolt_Boltpay_Block_Checkout_Boltpay::CHECKOUT_TYPE_MULTI_PAGE;
         $config = $this->getPaymentBoltpayConfig('allowed_button_by_custom_routes', $checkoutType);
         // removes all NULL, FALSE and Empty Strings but leaves 0 (zero) values
-        $result = array_filter(explode(',', $config));
+        $configData = explode(',', $config);
+        $result = array_values(array_filter(array_map('trim', $configData), 'strlen'));
 
         return (empty($result)) ? [] : $result;
     }
@@ -193,5 +194,29 @@ trait Bolt_Boltpay_Helper_ConfigTrait {
         $isEverywhere = $this->shouldAddButtonEverywhere();
 
         return ($active && $isEverywhere);
+    }
+
+    /**
+     * Get Api key configuration
+     *
+     * @return mixed
+     */
+    public function getApiKeyConfig()
+    {
+        return $this->getExtraConfig('datadogKey');
+    }
+
+    /**
+     * Get severity configuration
+     *
+     * @return array
+     */
+    public function getSeverityConfig()
+    {
+        $severityString = $this->getExtraConfig('datadogKeySeverity');
+        $severityString = preg_replace('/\s+/', '', $severityString);
+        $severities = explode(',', $severityString);
+
+        return $severities;
     }
 }

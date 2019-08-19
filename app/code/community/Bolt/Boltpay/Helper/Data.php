@@ -28,6 +28,7 @@ class Bolt_Boltpay_Helper_Data extends Mage_Core_Helper_Abstract
     use Bolt_Boltpay_Helper_GeneralTrait;
     use Bolt_Boltpay_Helper_LoggerTrait;
     use Bolt_Boltpay_Helper_TransactionTrait;
+    use Bolt_Boltpay_Helper_DataDogTrait;
 
     /**
      * Collect Bolt callbacks for js config.
@@ -157,25 +158,15 @@ class Bolt_Boltpay_Helper_Data extends Mage_Core_Helper_Abstract
                 document.getElementById('edit_form').appendChild(input);
 
                 // order and order.submit should exist for admin
-                if ((typeof order !== 'undefined' ) && (typeof order.submit === 'function')) {
-                    order_completed = true;
+                if ((typeof order !== 'undefined' ) && (typeof order.submit === 'function')) { 
+                    window.order_completed = true;
                     callback();
                 }
             }"
             : "function(transaction, callback) {
-                new Ajax.Request(
-                    '$saveOrderUrl',
-                    {
-                        method:'post',
-                        onSuccess:
-                            function() {
-                                $successCustom
-                                order_completed = true;
-                                callback();
-                            },
-                        parameters: 'reference='+transaction.reference
-                    }
-                );
+                window.bolt_transaction_reference = transaction.reference;
+                $successCustom
+                callback();
             }";
     }
 
@@ -186,13 +177,17 @@ class Bolt_Boltpay_Helper_Data extends Mage_Core_Helper_Abstract
      */
     public function buildOnCloseCallback($closeCustom, $checkoutType)
     {
-        $successUrl = $this->getMagentoUrl(Mage::getStoreConfig('payment/boltpay/successpage'));
+        // For frontend URLs, we want to "session id process" the URL to get the 
+        // final format URL which may or may not contain the __SID=(S|U) parameter
+        $successUrl = Mage::getModel('core/url')->sessionUrlVar(
+            $this->getMagentoUrl(Mage::getStoreConfig('payment/boltpay/successpage'))
+        );
         $javascript = "";
         switch ($checkoutType) {
             case Bolt_Boltpay_Block_Checkout_Boltpay::CHECKOUT_TYPE_ADMIN:
                 $javascript .=
                     "
-                    if (order_completed && (typeof order !== 'undefined' ) && (typeof order.submit === 'function')) {
+                    if (window.order_completed && (typeof order !== 'undefined' ) && (typeof order.submit === 'function')) {
                         $closeCustom
                         var bolt_hidden = document.getElementById('boltpay_payment_button');
                         bolt_hidden.classList.remove('required-entry');
@@ -200,19 +195,31 @@ class Bolt_Boltpay_Helper_Data extends Mage_Core_Helper_Abstract
                     }
                     ";
                 break;
+            case Bolt_Boltpay_Block_Checkout_Boltpay::CHECKOUT_TYPE_PRODUCT_PAGE:
+                $quoteId = Mage::getSingleton('checkout/session')->getQuoteId();
+                $successUrl = $this->getMagentoUrl(Mage::getStoreConfig('payment/boltpay/successpage'), array('checkoutType' => $checkoutType, 'session_quote_id' => $quoteId));
+                break;
             case Bolt_Boltpay_Block_Checkout_Boltpay::CHECKOUT_TYPE_FIRECHECKOUT:
                 $javascript .=
                     "
+                    $closeCustom
                     isFireCheckoutFormValid = false;
                     initBoltButtons();
                     ";
-                break;
+                $closeCustom = '';
+                // fall-through
             default:
-                $javascript .= "
-                    if (order_completed) {
-                        location.href = '$successUrl';
+                // Backup success page forwarding for Firecheckout, Onepage Checkout, Multi-Checkout/Mini-Cart
+                // Generally all checkouts should fall-through to this
+                $appendChar = (strpos($successUrl, '?') === false) ? '?' : '&';
+
+                $javascript .=
+                    "
+                    $closeCustom
+                    if (window.bolt_transaction_reference) {
+                         window.location = '$successUrl'+'$appendChar'+'bolt_transaction_reference='+window.bolt_transaction_reference;
                     }
-                ";
+                    ";
         }
 
         return $javascript;

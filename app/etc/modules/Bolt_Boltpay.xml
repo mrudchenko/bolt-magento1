@@ -24,7 +24,6 @@
       <depends>
         <Mage_Sales/>
         <Mage_Checkout/>
-        <TBT_Rewards/>
       </depends>
     </Bolt_Boltpay>
   </modules>

@@ -15,8 +15,7 @@
  * @license    http://opensource.org/licenses/osl-3.0.php  Open Software License (OSL 3.0)
  */
 
-require_once(Mage::getModuleDir('controllers','TBT_Rewards').DS.'Adminhtml'.DS.'Sales'.DS.'Order'.DS.'CreateController.php');
-require_once(Mage::getModuleDir('controllers','Bolt_Boltpay').DS.'OrderControllerTrait.php');
+require_once(Mage::getModuleDir('controllers','Mage_Adminhtml').DS.'Sales'.DS.'Order'.DS.'CreateController.php');
 
 /**
  * Adminhtml sales orders creation process controller
@@ -25,9 +24,10 @@ require_once(Mage::getModuleDir('controllers','Bolt_Boltpay').DS.'OrderControlle
  * @package    Mage_Adminhtml
  * @author      Magento Core Team <core@magentocommerce.com>
  */
-class Bolt_Boltpay_Adminhtml_Sales_Order_CreateController extends TBT_Rewards_Adminhtml_Sales_Order_CreateController
+class Bolt_Boltpay_Adminhtml_Sales_Order_CreateController
+    extends Mage_Adminhtml_Sales_Order_CreateController implements Bolt_Boltpay_Controller_Interface
 {
-    use Bolt_Boltpay_OrderControllerTrait;
+    use Bolt_Boltpay_Controller_Traits_OrderControllerTrait;
 
     /**
      * Add address data to the quote for Bolt.  This is normally deferred to
@@ -141,6 +141,9 @@ class Bolt_Boltpay_Adminhtml_Sales_Order_CreateController extends TBT_Rewards_Ad
 
             $this->_getSession()->clear();
             Mage::getSingleton('adminhtml/session')->addSuccess($this->__('The order has been created.'));
+
+            $this->boltHelper()->logInfo("The order {$order->getIncrementId()} has been created.",array('order' => var_export($order->debug(), true)));
+
             if (Mage::getSingleton('admin/session')->isAllowed('sales/order/actions/view')) {
                 $this->_redirect('*/sales_order/view', array('order_id' => $order->getId()));
             } else {
@@ -152,6 +155,7 @@ class Bolt_Boltpay_Adminhtml_Sales_Order_CreateController extends TBT_Rewards_Ad
         } catch (Mage_Payment_Model_Info_Exception $e) {
             if ($paymentData['method'] == 'boltpay') {
                 $this->boltHelper()->notifyException($e);
+                $this->boltHelper()->logException($e);
             }
             $this->_getOrderCreateModel()->saveQuote();
             $message = $e->getMessage();
@@ -162,6 +166,7 @@ class Bolt_Boltpay_Adminhtml_Sales_Order_CreateController extends TBT_Rewards_Ad
         } catch (Mage_Core_Exception $e){
             if ($paymentData['method'] == 'boltpay') {
                 $this->boltHelper()->notifyException($e);
+                $this->boltHelper()->logException($e);
             }
             $message = $e->getMessage();
             if( !empty($message) ) {
@@ -171,6 +176,7 @@ class Bolt_Boltpay_Adminhtml_Sales_Order_CreateController extends TBT_Rewards_Ad
         } catch (Exception $e) {
             if ($paymentData['method'] == 'boltpay') {
                 $this->boltHelper()->notifyException($e);
+                $this->boltHelper()->logException($e);
             }
             $this->_getSession()->addException($e, $this->__('Order saving error: %s', $e->getMessage()));
             $this->_redirect('*/*/');
@@ -260,6 +266,14 @@ class Bolt_Boltpay_Adminhtml_Sales_Order_CreateController extends TBT_Rewards_Ad
         if (!$this->_getOrderCreateModel()->getQuote()->isVirtual()) {
             $this->_getQuote()->getShippingAddress()->setCollectShippingRates(true)->collectShippingRates()->save();
         }
+
+        Mage::dispatchEvent(
+            'bolt_boltpay_admin_normalize_order_data_after',
+            array(
+                'request' => $this->getRequest(),
+                'orderCreateModel' => $this->_getOrderCreateModel()
+            )
+        );
     }
 
 
